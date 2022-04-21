@@ -1,6 +1,9 @@
 # SGDL
 
+<div align=center>
 <img src=./fig/overview.jpg width="70%" ></img>
+</div>
+
 
 This repository is the Pytorch implementation of the paper:
 
@@ -16,15 +19,14 @@ If you want to use our codes and datasets in your research, please cite:
 
 ```
 @inproceedings{SGDL22,
-  title		= {Self-Guided Learning to Denoise 
-               for Robust Recommendation},
+  title		= {Self-Guided Learning to Denoise for Robust Recommendation},
   author	= {Yunjun Gao and 
-  			   Yuntao Du and 
-  			   Yujia Hu and 
-  			   Lu Chen and 
-  			   Xinjun Zhu and 
-  			   Ziquan Fang and 
-  			   Baihua Zheng},
+  	           Yuntao Du and 
+  	           Yujia Hu and 
+  	           Lu Chen and 
+  		   Xinjun Zhu and 
+  		   Ziquan Fang and 
+  		   Baihua Zheng},
   booktitle	= {{SIGIR}},
   year		= {2022}
 }
