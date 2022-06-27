@@ -19,7 +19,7 @@ ltw = model.LTW(args.input, args.hidden1, args.output).cuda()
 utils.Logging(log_file, str(args))
 results = []
 args.lr /= 5
-opt = torch.optim.Adam(Recmodel.parameters(), lr=args.lr)
+opt = torch.optim.Adam(Recmodel.params(), lr=args.lr)
 
 # ========== Phase I: Memorization ========== #
 for epoch in range(args.epochs):
@@ -65,10 +65,14 @@ for epoch in range(trans_epoch, args.epochs):
         # save current best model
         if is_save:
             best_epoch = epoch
-            torch.save(Recmodel.state_dict(), './{}/model_{}_{}.pth'.format(
+            torch.save(Recmodel.state_dict(), './{}/model_{}_{}_{}_{}_{}_schedule_{}.pth'.format(
                 args.dataset,
                 args.lr,
-                args.model
+                args.meta_lr,
+                args.model,
+                args.schedule_type,
+                args.tau,
+                args.schedule_lr
             ))
         valid_log.add_row(
             [valid_result['precision'][0], valid_result['recall'][0], valid_result['ndcg'][0], best_epoch]
@@ -95,10 +99,14 @@ for epoch in range(trans_epoch, args.epochs):
 
 # ========== Test ========== #
 utils.Logging(log_file, f'=========================Test=========================')
-state = torch.load('./{}/model_{}_{}.pth'.format(
+state = torch.load('./{}/model_{}_{}_{}_{}_{}_schedule_{}.pth'.format(
                 args.dataset,
                 args.lr,
-                args.model
+                args.meta_lr,
+                args.model,
+                args.schedule_type,
+                args.tau,
+                args.schedule_lr
             ))
 Recmodel.load_state_dict(state)
 training.test(train_dataset, Recmodel, valid=False, multicore=args.multicore)
