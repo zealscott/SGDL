@@ -20,7 +20,7 @@ parser.add_argument('--history_len', type=int, default=10,
                         help='length of memorization history')
 parser.add_argument('--meta_lr', type=float, default=0.0005,
                         help="the learning rate of meta-learning procedure")
-parser.add_argument('--schedule_lr', type=float, default=0.001,
+parser.add_argument('--schedule_lr', type=float, default=0.005,
                         help="the learning rate of scheduler")
 parser.add_argument('--model', type=str, default='lgn', help='backbone model')
 parser.add_argument('--eval_freq', type=int, default=10, help='validation frequency')
@@ -54,7 +54,7 @@ parser.add_argument('--output', type=int, default=1, help='output size of LTW')
 
 # ============= Params for Scheduler =============== #
 parser.add_argument('--schedule_type', type=str, default='gumbel', help='training strategy of scheduler: reinforce, gumbel')
-parser.add_argument('--tau', type=float, default=0.05, help='temperature of gumbel softmax')
+parser.add_argument('--tau', type=float, default=1.0, help='temperature of gumbel softmax')
 
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda_device
@@ -70,7 +70,7 @@ device = torch.device('cuda' if GPU else "cpu")
 CORES = multiprocessing.cpu_count() // 2
 topks = eval(args.topks)
 
-log_file = f'./log/{args.dataset}_{args.model}_lr{args.lr}_{args.schedule_type}.txt'
+log_file = f'./log/{args.dataset}_{args.model}_lr{args.lr}_metalr{args.meta_lr}_{args.schedule_type}_tau{args.tau}_schedule_{args.schedule_lr}.txt'
 
 #log_file = f'./log/debug.txt'
 

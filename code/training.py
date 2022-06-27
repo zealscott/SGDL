@@ -9,6 +9,7 @@ from sklearn.mixture import GaussianMixture as GMM
 from parse import args, log_file
 import parse
 from scheduler import Scheduler
+from copy import deepcopy
 
 CORES = multiprocessing.cpu_count() // 2
 
@@ -104,8 +105,8 @@ def self_guided_train_schedule_reinforce(train_dataset, clean_dataset, recmodel,
     train_loss, meta_loss = 0, 0
     scheduler = Scheduler(len(recmodel.state_dict())).cuda()
     recmodel.train()
-    train_opt = torch.optim.Adam(recmodel.parameters(), lr=args.lr)
-    meta_opt = torch.optim.Adam(ltw.parameters(), lr=args.meta_lr)
+    train_opt = torch.optim.Adam(recmodel.params(), lr=args.lr)
+    meta_opt = torch.optim.Adam(ltw.params(), lr=args.meta_lr)
     schedule_opt = torch.optim.Adam(scheduler.parameters(), lr=args.schedule_lr)
 
     # sampling
@@ -143,32 +144,35 @@ def self_guided_train_schedule_reinforce(train_dataset, clean_dataset, recmodel,
                                                    batch_size=args.batch_size))
             batch_users_clean, batch_pos_clean, batch_neg_clean = next(clean_data_iter)
 
-        weight_for_local_update = list(recmodel.state_dict().values())
+        meta_model = deepcopy(recmodel)
 
         # ============= get input of the scheduler ============= #
-        L_theta, _ = recmodel.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
+        L_theta, _ = meta_model.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
         L_theta = torch.reshape(L_theta, (len(L_theta), 1))
+
+        grads_theta_list = []
+        for k in range(len(batch_users_clean)):
+            grads_theta_list.append(torch.autograd.grad(L_theta[k], (meta_model.params()), create_graph=True,
+                                                        retain_graph=True))
+
         v_L_theta = ltw(L_theta.data)
 
         # assumed update
         L_theta_meta = torch.sum(L_theta * v_L_theta) / len(batch_users_clean)
-        recmodel.zero_grad()
-        grads = torch.autograd.grad(L_theta_meta, (recmodel.parameters()), create_graph=True, retain_graph=True)
+        meta_model.zero_grad()
+        grads = torch.autograd.grad(L_theta_meta, (meta_model.params()), create_graph=True, retain_graph=True)
 
-        weight_names = recmodel.weight_names
-        for i in range(len(weight_names)):
-            recmodel.fast_weights[weight_names[i]] = weight_for_local_update[i] - args.lr * grads[i]
-        recmodel.load_state_dict(recmodel.fast_weights)
+        meta_model.update_params(lr_inner=args.lr, source_params=grads)
+        del grads
 
-        L_theta_hat, _ = recmodel.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
+        L_theta_hat, _ = meta_model.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
 
         # for each sample, calculate gradients of 2 losses
         input_embedding_cos = []
         for k in range(len(batch_users_clean)):
             task_grad_cos = []
-            grads_theta = torch.autograd.grad(L_theta[k], (recmodel.parameters()), create_graph=True,
-                                              retain_graph=True)
-            grads_theta_hat = torch.autograd.grad(L_theta_hat[k], (recmodel.parameters()), create_graph=True,
+            grads_theta = grads_theta_list[k]
+            grads_theta_hat = torch.autograd.grad(L_theta_hat[k], (meta_model.params()), create_graph=True,
                                                   retain_graph=True)
 
             # calculate cosine similarity for each parameter
@@ -191,27 +195,22 @@ def self_guided_train_schedule_reinforce(train_dataset, clean_dataset, recmodel,
         batch_neg_clean = batch_neg_clean[sample_idx]
 
         # ============= training ============= #
-        recmodel.load_state_dict(recmodel.keep_weight)
+        meta_model = deepcopy(recmodel)
 
         # assumed update of theta (theta -> theta')
-        cost, reg_loss = recmodel.loss(batch_users, batch_pos, batch_neg, reduce=False)
+        cost, reg_loss = meta_model.loss(batch_users, batch_pos, batch_neg, reduce=False)
         cost_v = torch.reshape(cost, (len(cost), 1))
         v_lambda = ltw(cost_v.data)
 
         l_f_meta = torch.sum(cost_v * v_lambda) / len(batch_users)
-        recmodel.zero_grad()
-        grads = torch.autograd.grad(l_f_meta, (recmodel.parameters()), create_graph=True)
-
-        weight_names = recmodel.weight_names
-        for i in range(len(weight_names)):
-            recmodel.fast_weights[weight_names[i]] = weight_for_local_update[i] - args.lr * grads[i]
+        meta_model.zero_grad()
+        grads = torch.autograd.grad(l_f_meta, (meta_model.params()), create_graph=True)
 
         # load theta' and update params of ltw
-        recmodel.load_state_dict(recmodel.fast_weights)
-
+        meta_model.update_params(lr_inner=args.lr, source_params=grads)
         del grads
 
-        l_g_meta, _ = recmodel.loss(batch_users_clean, batch_pos_clean, batch_neg_clean)
+        l_g_meta, _ = meta_model.loss(batch_users_clean, batch_pos_clean, batch_neg_clean)
 
         # REINFORCE
         loss_schedule = 0
@@ -229,7 +228,6 @@ def self_guided_train_schedule_reinforce(train_dataset, clean_dataset, recmodel,
         schedule_opt.step()
 
         # reload and actually update theta
-        recmodel.load_state_dict(recmodel.keep_weight)
         cost_w, _ = recmodel.loss(batch_users, batch_pos, batch_neg, reduce=False)
         cost_v = torch.reshape(cost_w, (len(cost_w), 1))
         with torch.no_grad():
@@ -255,8 +253,9 @@ def self_guided_train_schedule_gumbel(train_dataset, clean_dataset, recmodel, lt
     train_loss, meta_loss = 0, 0
     scheduler = Scheduler(len(recmodel.state_dict())).cuda()
     recmodel.train()
-    train_opt = torch.optim.Adam(recmodel.parameters(), lr=args.lr)
-    meta_opt = torch.optim.Adam(ltw.parameters(), lr=args.meta_lr)
+
+    train_opt = torch.optim.Adam(recmodel.params(), lr=args.lr)
+    meta_opt = torch.optim.Adam(ltw.params(), lr=args.meta_lr)
     schedule_opt = torch.optim.Adam(scheduler.parameters(), lr=args.schedule_lr)
 
     # sampling
@@ -292,32 +291,35 @@ def self_guided_train_schedule_gumbel(train_dataset, clean_dataset, recmodel, lt
                                                    batch_size=args.batch_size))
             batch_users_clean, batch_pos_clean, batch_neg_clean = next(clean_data_iter)
 
-        weight_for_local_update = list(recmodel.state_dict().values())
+        meta_model = deepcopy(recmodel)
 
         # ============= get input of the scheduler ============= #
-        L_theta, _ = recmodel.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
+        L_theta, _ = meta_model.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
         L_theta = torch.reshape(L_theta, (len(L_theta), 1))
+
+        grads_theta_list = []
+        for k in range(len(batch_users_clean)):
+            grads_theta_list.append(torch.autograd.grad(L_theta[k], (meta_model.params()), create_graph=True,
+                                              retain_graph=True))
+
         v_L_theta = ltw(L_theta.data)
 
         # assumed update
         L_theta_meta = torch.sum(L_theta * v_L_theta) / len(batch_users_clean)
-        recmodel.zero_grad()
-        grads = torch.autograd.grad(L_theta_meta, (recmodel.parameters()), create_graph=True, retain_graph=True)
+        meta_model.zero_grad()
+        grads = torch.autograd.grad(L_theta_meta, (meta_model.params()), create_graph=True, retain_graph=True)
 
-        weight_names = recmodel.weight_names
-        for i in range(len(weight_names)):
-            recmodel.fast_weights[weight_names[i]] = weight_for_local_update[i] - args.lr * grads[i]
-        recmodel.load_state_dict(recmodel.fast_weights)
+        meta_model.update_params(lr_inner=args.lr, source_params=grads)
+        del grads
 
-        L_theta_hat, _ = recmodel.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
+        L_theta_hat, _ = meta_model.loss(batch_users_clean, batch_pos_clean, batch_neg_clean, reduce=False)
 
         # for each sample, calculate gradients of 2 losses
         input_embedding_cos = []
         for k in range(len(batch_users_clean)):
             task_grad_cos = []
-            grads_theta = torch.autograd.grad(L_theta[k], (recmodel.parameters()), create_graph=True,
-                                              retain_graph=True)
-            grads_theta_hat = torch.autograd.grad(L_theta_hat[k], (recmodel.parameters()), create_graph=True,
+            grads_theta = grads_theta_list[k]
+            grads_theta_hat = torch.autograd.grad(L_theta_hat[k], (meta_model.params()), create_graph=True,
                                                   retain_graph=True)
 
             # calculate cosine similarity for each parameter
@@ -340,38 +342,33 @@ def self_guided_train_schedule_gumbel(train_dataset, clean_dataset, recmodel, lt
 
         sample_idx = scheduler.gumbel_softmax(logits, temperature=args.tau, hard=True)
 
+        # ============= training ============= #
+        meta_model = deepcopy(recmodel)
+
+        # assumed update of theta (theta -> theta')
+        cost, reg_loss = meta_model.loss(batch_users, batch_pos, batch_neg, reduce=False)
+        cost_v = torch.reshape(cost, (len(cost), 1))
+        v_lambda = ltw(cost_v.data)
+
+        l_f_meta = torch.sum(cost_v * v_lambda) / len(batch_users)
+        meta_model.zero_grad()
+        grads = torch.autograd.grad(l_f_meta, (meta_model.params()), create_graph=True)
+
+        # load theta' and update params of ltw
+        meta_model.update_params(lr_inner=args.lr, source_params=grads)
+        del grads
+
         if args.model == 'lgn':
-            user_emb, pos_emb, neg_emb, _, _, _ = recmodel.getEmbedding(batch_users_clean.long(),
+            user_emb, pos_emb, neg_emb, _, _, _ = meta_model.getEmbedding(batch_users_clean.long(),
                                                                         batch_pos_clean.long(), batch_neg_clean.long())
         else:
-            user_emb, pos_emb, neg_emb = recmodel(batch_users_clean, batch_pos_clean, batch_neg_clean)
+            user_emb, pos_emb, neg_emb = meta_model(batch_users_clean, batch_pos_clean, batch_neg_clean)
 
         batch_users_clean = torch.mm(sample_idx, user_emb)
         batch_pos_clean = torch.mm(sample_idx, pos_emb)
         batch_neg_clean = torch.mm(sample_idx, neg_emb)
 
-        # ============= training ============= #
-        recmodel.load_state_dict(recmodel.keep_weight)
-
-        # assumed update of theta (theta -> theta')
-        cost, reg_loss = recmodel.loss(batch_users, batch_pos, batch_neg, reduce=False)
-        cost_v = torch.reshape(cost, (len(cost), 1))
-        v_lambda = ltw(cost_v.data)
-
-        l_f_meta = torch.sum(cost_v * v_lambda) / len(batch_users)
-        recmodel.zero_grad()
-        grads = torch.autograd.grad(l_f_meta, (recmodel.parameters()), create_graph=True)
-
-        weight_names = recmodel.weight_names
-        for i in range(len(weight_names)):
-            recmodel.fast_weights[weight_names[i]] = weight_for_local_update[i] - args.lr * grads[i]
-
-        # load theta' and update params of ltw
-        recmodel.load_state_dict(recmodel.fast_weights)
-
-        del grads
-
-        l_g_meta = recmodel.loss_gumbel(batch_users_clean, batch_pos_clean, batch_neg_clean)
+        l_g_meta = meta_model.loss_gumbel(batch_users_clean, batch_pos_clean, batch_neg_clean)
 
         meta_opt.zero_grad()
         l_g_meta.backward(retain_graph=True)
@@ -382,7 +379,6 @@ def self_guided_train_schedule_gumbel(train_dataset, clean_dataset, recmodel, lt
         schedule_opt.step()
 
         # reload and actually update theta
-        recmodel.load_state_dict(recmodel.keep_weight)
         cost_w, _ = recmodel.loss(batch_users, batch_pos, batch_neg, reduce=False)
         cost_v = torch.reshape(cost_w, (len(cost_w), 1))
         with torch.no_grad():
