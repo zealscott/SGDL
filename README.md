@@ -7,7 +7,7 @@
 
 This repository is the Pytorch implementation of the paper:
 
-> Yunjun Gao, Yuntao Du, Yujia Hu, Lu Chen, Xinjun Zhu, Ziquan Fang and Baihua Zheng. (2022). Self-Guided Learning to Denoise for Robust Recommendation. Paper in [ACM DL]() or Paper in [arXiv](https://arxiv.org/abs/2204.06832). In SIGIR'22, Madrid, Spain, July 11-15, 2022.
+> Yunjun Gao, Yuntao Du, Yujia Hu, Lu Chen, Xinjun Zhu, Ziquan Fang and Baihua Zheng. (2022). Self-Guided Learning to Denoise for Robust Recommendation. Paper in [ACM DL](https://dl.acm.org/doi/10.1145/3477495.3532059) or Paper in [arXiv](https://arxiv.org/abs/2204.06832). In SIGIR'22, Madrid, Spain, July 11-15, 2022.
 
 ## Introduction
 
@@ -27,6 +27,7 @@ If you want to use our codes and datasets in your research, please cite:
   		   Xinjun Zhu and 
   		   Ziquan Fang and 
   		   Baihua Zheng},
+  pages         = {1412--1422},
   booktitle	= {{SIGIR}},
   year		= {2022}
 }
